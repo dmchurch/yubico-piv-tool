@@ -46,6 +46,7 @@ libykcs11_la_SOURCES += openssl_utils.c openssl_utils.h openssl_types.h
 libykcs11_la_SOURCES += objects.c objects.h obj_types.h
 libykcs11_la_SOURCES += pkcs11.h  pkcs11y.h
 libykcs11_la_SOURCES += ykcs11-version.h
+libykcs11_la_SOURCES += pinpad-osx.c pinpad-osx.h
 
 EXTRA_libykcs11_la_DEPENDENCIES = ykcs11.map
 
@@ -53,6 +54,7 @@ libykcs11_la_LIBADD = ../lib/libykpiv.la
 libykcs11_la_LIBADD += ../tool/libpiv_util.la
 
 libykcs11_la_LDFLAGS = -no-undefined
+libykcs11_la_LDFLAGS += -framework CoreFoundation
 libykcs11_la_LDFLAGS += -version-info $(LT_CURRENT):$(LT_REVISION):$(LT_AGE)
 
 if HAVE_LD_VERSION_SCRIPT

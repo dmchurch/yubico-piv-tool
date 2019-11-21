@@ -40,6 +40,7 @@
 #include "openssl_types.h"
 #include "openssl_utils.h"
 #include "debug.h"
+#include "pinpad-osx.h"
 
 #include <stdbool.h>
 #include "../tool/util.h"
@@ -769,6 +770,15 @@ CK_DEFINE_FUNCTION(CK_RV, C_SetOperationState)(
   return CKR_FUNCTION_FAILED;
 }
 
+static inline void clear_string(char **str) {
+  if (*str) {
+    memset(*str, 0, strlen(*str));
+  }
+}
+
+#define securebuf lenbuf __attribute__((cleanup(clear_data))) *
+
+
 CK_DEFINE_FUNCTION(CK_RV, C_Login)(
   CK_SESSION_HANDLE hSession,
   CK_USER_TYPE userType,
@@ -779,6 +789,8 @@ CK_DEFINE_FUNCTION(CK_RV, C_Login)(
   DIN;
   CK_RV          rv;
   token_vendor_t token;
+  int using_pinpad = 0;
+  char __attribute__((cleanup(clear_string))) *gotpin = NULL;
 
   if (piv_state == NULL) {
     DBG("libykpiv is not initialized or already finalized");
@@ -791,6 +803,18 @@ CK_DEFINE_FUNCTION(CK_RV, C_Login)(
     return CKR_USER_TYPE_INVALID;
 
   DBG("user %lu, pin %s, pinlen %lu", userType, pPin, ulPinLen);
+  if (pPin && !strcmp((char *)pPin, "pinpad")) {
+    if (userType == CKU_CONTEXT_SPECIFIC) {
+      gotpin = osx_pinpad_get_pin();
+      if (gotpin) {
+        pPin = (CK_UTF8CHAR_PTR) gotpin;
+        ulPinLen = strlen(gotpin);
+        DBG("from pinpad: pin %s, pinlen %lu", pPin, ulPinLen);
+      }
+    } else {
+      using_pinpad = userType;
+    }
+  }
 
   if (session.handle != YKCS11_SESSION_ID) {
     DBG("Session is not open");
@@ -824,11 +848,14 @@ CK_DEFINE_FUNCTION(CK_RV, C_Login)(
       return CKR_USER_ANOTHER_ALREADY_LOGGED_IN;
     }
 
-    rv = token.token_login(piv_state, CKU_USER, pPin, ulPinLen);
-    if (rv != CKR_OK) {
-      DBG("Unable to login as regular user");
-      return rv;
+    if (!using_pinpad) {
+      rv = token.token_login(piv_state, CKU_USER, pPin, ulPinLen);
+      if (rv != CKR_OK) {
+        DBG("Unable to login as regular user");
+        return rv;
+      }
     }
+    session.using_pinpad = using_pinpad;
 
     if ((session.info.flags & CKF_RW_SESSION) == 0)
       session.info.state = CKS_RO_USER_FUNCTIONS;
@@ -847,11 +874,14 @@ CK_DEFINE_FUNCTION(CK_RV, C_Login)(
         session.info.state == CKS_RW_USER_FUNCTIONS)
       return CKR_USER_ANOTHER_ALREADY_LOGGED_IN;
 
-    rv = token.token_login(piv_state, CKU_SO, pPin, ulPinLen);
-    if (rv != CKR_OK) {
-      DBG("Unable to login as SO");
-      return rv;
+    if (!using_pinpad) {
+      rv = token.token_login(piv_state, CKU_SO, pPin, ulPinLen);
+      if (rv != CKR_OK) {
+        DBG("Unable to login as SO");
+        return rv;
+      }
     }
+    session.using_pinpad = using_pinpad;
 
     session.info.state = CKS_RW_SO_FUNCTIONS;
     break;
@@ -898,6 +928,7 @@ CK_DEFINE_FUNCTION(CK_RV, C_Logout)(
     return CKR_SESSION_HANDLE_INVALID;
   }
 
+  session.using_pinpad = 0;
   if (session.info.state == CKS_RO_PUBLIC_SESSION ||
       session.info.state == CKS_RW_PUBLIC_SESSION)
     return CKR_USER_NOT_LOGGED_IN;
@@ -1698,12 +1729,15 @@ CK_DEFINE_FUNCTION(CK_RV, C_SignInit)(
   CK_ULONG     key_len = 0;
   CK_BYTE      exp[3];
   CK_BYTE      buf[1024] = {0};
+  static CK_BYTE label[300] = {0};
+  CK_RV        rv;
   CK_ATTRIBUTE template[] = {
     {CKA_KEY_TYPE, &type, sizeof(type)},
     {CKA_MODULUS_BITS, &key_len, sizeof(key_len)},
     {CKA_MODULUS, NULL, 0},
     {CKA_PUBLIC_EXPONENT, exp, sizeof(exp)},
     {CKA_EC_POINT, buf, sizeof(buf)},
+    {CKA_LABEL, label, sizeof(label)},
   };
 
   DIN;
@@ -1732,6 +1766,22 @@ CK_DEFINE_FUNCTION(CK_RV, C_SignInit)(
     return CKR_ARGUMENTS_BAD;
 
   DBG("Trying to sign some data with mechanism %lu and key %lu", pMechanism->mechanism, hKey);
+
+  if (session.using_pinpad) {
+    DBG("PIN auth delayed until use, asking user...");
+    token_vendor_t token = get_token_vendor(session.slot->token->vid);
+    char __attribute__((cleanup(clear_string))) *gotpin = NULL;
+
+    gotpin = osx_pinpad_get_pin();
+    if (gotpin) {
+      rv = token.token_login(piv_state, session.using_pinpad, (CK_UTF8CHAR_PTR)gotpin, strlen(gotpin));
+
+      if (rv == CKR_OK) {
+        session.using_pinpad = 0;
+      }
+    }
+
+  }
 
   // Check if mechanism is supported
   if (check_sign_mechanism(&session, pMechanism) != CKR_OK) {
@@ -1811,6 +1861,11 @@ CK_DEFINE_FUNCTION(CK_RV, C_SignInit)(
   if (op_info.op.sign.key_id == 0) {
     DBG("Incorrect key %lu", hKey);
     return CKR_KEY_HANDLE_INVALID;
+  }
+  op_info.op.sign.key_label = NULL;
+  if (get_attribute(&session, hKey, template + 5) == CKR_OK) {
+    DBG("Key label is %s", label);
+    op_info.op.sign.key_label = (char *)label;
   }
 
   DBG("Algorithm is %d", op_info.op.sign.algo);
@@ -1941,7 +1996,7 @@ CK_DEFINE_FUNCTION(CK_RV, C_Sign)(
 
   *pulSignatureLen = cbSignatureLen = sizeof(op_info.buf);
 
-  piv_rv = ykpiv_sign_data(piv_state, op_info.buf, op_info.buf_len, op_info.buf, &cbSignatureLen, op_info.op.sign.algo, op_info.op.sign.key_id);
+  piv_rv = osx_pinpad_sign_data(piv_state, op_info.buf, op_info.buf_len, op_info.buf, &cbSignatureLen, op_info.op.sign.algo, op_info.op.sign.key_id, op_info.op.sign.key_label);
 
   *pulSignatureLen = cbSignatureLen;
 

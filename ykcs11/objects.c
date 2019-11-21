@@ -625,6 +625,13 @@ CK_RV get_proa(CK_OBJECT_HANDLE obj, CK_ATTRIBUTE_PTR template) {
 
   case CKA_LABEL:
     DBG("LABEL");
+    if (cert_objects[piv_objects[obj].sub_id].data) {
+      char *name = get_cert_subject_name(cert_objects[piv_objects[obj].sub_id].data);
+      DBG("X509: %s", name);
+      len = strlen(name) + 1;
+      data = (CK_BYTE_PTR) name;
+      break;
+    }
     len = strlen(piv_objects[obj].label) + 1;
     data = (CK_BYTE_PTR) piv_objects[obj].label;
     break;
@@ -866,6 +873,13 @@ CK_RV get_puoa(CK_OBJECT_HANDLE obj, CK_ATTRIBUTE_PTR template) {
 
   case CKA_LABEL:
     DBG("LABEL");
+    if (cert_objects[piv_objects[obj].sub_id].data) {
+      char *name = get_cert_subject_name(cert_objects[piv_objects[obj].sub_id].data);
+      DBG("X509: %s", name);
+      len = strlen(name) + 1;
+      data = (CK_BYTE_PTR) name;
+      break;
+    }
     len = strlen(piv_objects[obj].label) + 1;
     data = (CK_BYTE_PTR) piv_objects[obj].label;
     break;

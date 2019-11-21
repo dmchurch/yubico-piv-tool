@@ -55,6 +55,7 @@ typedef struct {
 typedef struct {
   CK_SESSION_HANDLE handle;
   CK_SESSION_INFO   info; /* slotid, state, flags, deviceerror */
+  int               using_pinpad;
   ykcs11_slot_t     *slot;
 } ykcs11_session_t;
 
@@ -79,6 +80,7 @@ typedef struct {
   CK_BYTE           algo;    // Algo for ykpiv // TODO: infer this from the key length?
   CK_ULONG          key_id;  // Key id for ykpiv // TODO: make this a BYTE and store the id {0, 1, 2, 3}
   CK_ULONG          key_len; // Length in bits
+  char              *key_label;
 } sign_info_t;
 
 typedef struct {

@@ -67,6 +67,15 @@ CK_RV do_store_cert(CK_BYTE_PTR data, CK_ULONG len, X509 **cert) {
 
 }
 
+char *get_cert_subject_name(const X509 *cert) {
+  static char namebuf[300] = {};
+  X509_NAME *name = X509_get_subject_name(cert);
+  if (X509_NAME_get_text_by_NID(name, NID_commonName, namebuf, sizeof(namebuf)) > 0) {
+    return namebuf;
+  }
+  return NULL;
+}
+
 CK_RV do_create_empty_cert(CK_BYTE_PTR in, CK_ULONG in_len, CK_BBOOL is_rsa, CK_ULONG key_algorithm,
                            CK_BYTE_PTR out, CK_ULONG_PTR out_len) {
 

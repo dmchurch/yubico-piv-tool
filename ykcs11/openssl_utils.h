@@ -46,6 +46,7 @@ CK_RV do_check_cert(CK_BYTE_PTR in, CK_ULONG_PTR cert_len);
 CK_RV do_get_raw_cert(X509 *cert, CK_BYTE_PTR out, CK_ULONG_PTR out_len);
 CK_RV do_delete_cert(X509 **cert);
 //CK_RV free_cert(X509 *cert);
+char *get_cert_subject_name(const X509 *cert);
 
 CK_RV       do_store_pubk(X509 *cert, EVP_PKEY **key);
 CK_KEY_TYPE do_get_key_type(EVP_PKEY *key);
